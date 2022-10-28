@@ -1556,7 +1556,6 @@ def endpoint_controlpanel():
                                 db.close()
                     except Exception as e:
                         logFile("Error", e)
-                        pass
 
         ###
         # Everything past this point uses the old method of changing settings. Needs updated
@@ -1629,17 +1628,21 @@ def endpoint_createclass():
             db = sqlite3.connect(os.path.dirname(
                 os.path.abspath(__file__)) + '/data/database.db')
             dbcmd = db.cursor()
-            dbcmd.execute("INSERT INTO classes (name) VALUES (?)", [className])
-            db.commit()
-            classID = dbcmd.execute("SELECT uid FROM classes WHERE name=?", [
-                                    className]).fetchone()
-            userID = dbcmd.execute("SELECT uid FROM users WHERE username=?", [
-                                   sD.studentDict[request.remote_addr]['name']]).fetchone()
-            dbcmd.execute("INSERT INTO classusers (userid, classid) VALUES (?, ?)", [
-                          userID[0], classID[0]])
-            db.commit()
-            db.close()
-            sD.studentDict[request.remote_addr]['class'] = className
+            alreadyExist = dbcmd.execute("SELECT * FROM classes WHERE name=?", [className]).fetchone()
+            if  alreadyExist:
+                return render_template("message.html", message='Class Already Exists.')
+            else:
+                dbcmd.execute("INSERT INTO classes (owner, name) VALUES (?, ?)", [sD.studentDict[request.remote_addr]['name'], className])
+                db.commit()
+                classID = dbcmd.execute("SELECT uid FROM classes WHERE name=?", [
+                                        className]).fetchone()
+                userID = dbcmd.execute("SELECT uid FROM users WHERE username=?", [
+                                       sD.studentDict[request.remote_addr]['name']]).fetchone()
+                dbcmd.execute("INSERT INTO classusers (userid, classid) VALUES (?, ?)", [
+                              userID[0], classID[0]])
+                db.commit()
+                db.close()
+                sD.studentDict[request.remote_addr]['class'] = className
             if forward:
                 return redirect(forward, code=302)
             else:
@@ -1661,7 +1664,15 @@ def endpoint_createclass():
             else:
                 return render_template("message.html", message='No Class With That Name')
     else:
-        return render_template('createclass.html')
+        db = sqlite3.connect(os.path.dirname(
+            os.path.abspath(__file__)) + '/data/database.db')
+        dbcmd = db.cursor()
+        allClasses = dbcmd.execute("SELECT name FROM classes WHERE owner=?", [sD.studentDict[request.remote_addr]['name']]).fetchall()
+        db.close()
+        listClasses = []
+        for classes in allClasses:
+            listClasses.append(classes[0])
+        return render_template('createclass.html', allClasses=json.dumps(listClasses))
 
 
 @app.route('/createfightermatch', methods=['POST'])
@@ -2169,7 +2180,8 @@ def endpoint_home():
     if loginResult:
         return loginResult
     else:
-        return render_template("index.html")
+        className = sD.studentDict[request.remote_addr]['class']
+        return render_template("index.html", className = className)
 
 # ██
 # ██
@@ -2805,19 +2817,42 @@ def endpoint_selectclass():
         return redirect('/createclass?forward=' + request.args.get('forward'))
     else:
         if request.method == "POST":
-            className = request.form['className']
+            if (request.form['className']):
+                className = request.form['className']
+            else:
+                return render_template("message.html", message="No Class Was Selected")
             db = sqlite3.connect(os.path.dirname(
                 os.path.abspath(__file__)) + '/data/database.db')
             dbcmd = db.cursor()
             nameofClass = dbcmd.execute(
                 "SELECT name FROM classes WHERE name=?", [className]).fetchone()
             db.close()
-            if nameofClass[0]:
+            if nameofClass:
+                db = sqlite3.connect(os.path.dirname(
+                    os.path.abspath(__file__)) + '/data/database.db')
+                dbcmd = db.cursor()
+                classID = dbcmd.execute("SELECT uid FROM classes WHERE name=?", [
+                                        className]).fetchone()
+                userID = dbcmd.execute("SELECT uid FROM users WHERE username=?", [
+                    sD.studentDict[request.remote_addr]['name']]).fetchone()
+                dbcmd.execute("INSERT INTO classusers (userid, classid) VALUES (?, ?)", [
+                    userID[0], classID[0]])
+                db.commit()
+                db.close()
                 sD.studentDict[request.remote_addr]['class'] = className
                 return redirect('/home')
-            return render_template("message.html", message="No class with that name")
+            else: 
+                return render_template("message.html", message="No class with that name")
         else:
-            return render_template('selectclass.html')
+            db = sqlite3.connect(os.path.dirname(
+                os.path.abspath(__file__)) + '/data/database.db')
+            dbcmd = db.cursor()
+            allClasses = dbcmd.execute("SELECT name FROM classes").fetchall()
+            db.close()
+            listClasses = []
+            for classes in allClasses:
+                listClasses.append(classes[0])
+            return render_template('selectclass.html', allClasses=json.dumps(listClasses))
 
 
 @app.route('/sendblock')
@@ -2830,8 +2865,8 @@ def endpoint_sendblock():
         if blockId in colorDict:
             blockList.append([blockId, blockData])
             addBlock()
-            # fillBlocks()
-            return render_template("message.html", message="Got Block: " + blockId + ", " + blockData)
+            fillBlocks()
+            return render_template("message.html", message = "Got Block: " + blockId + ", " + blockData)
         else:
             return render_template("message.html", message="Bad block Id")
     else:
